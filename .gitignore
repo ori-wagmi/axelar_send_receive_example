@@ -1,0 +1,8 @@
+.editorconfig
+.notes
+
+artifacts/
+node_modules/
+cache/
+.cargo/
+target/
