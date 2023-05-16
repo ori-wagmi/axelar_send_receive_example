@@ -5,6 +5,7 @@
     "hardhat": "^2.14.0"
   },
   "dependencies": {
-    "@axelar-network/axelar-gmp-sdk-solidity": "^3.3.0"
+    "@axelar-network/axelar-gmp-sdk-solidity": "^3.3.0",
+    "dotenv": "^16.0.3"
   }
 }

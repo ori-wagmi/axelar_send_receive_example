@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.9;
 
 import {AxelarExecutable} from "@axelar-network/axelar-gmp-sdk-solidity/contracts/executable/AxelarExecutable.sol";
@@ -16,11 +16,11 @@ contract SendReceive is AxelarExecutable {
     string public chainName; // name of the chain this contract is deployed to
 
     struct Message {
-        address sender;
+        string sender;
         string message;
     }
 
-    Message public storedMessage;
+    Message public storedMessage; // message received from _execute
 
     constructor(
         address gateway_,
@@ -37,9 +37,7 @@ contract SendReceive is AxelarExecutable {
         string calldata message
     ) external payable {
         // 1. Generate GMP payload
-        bytes memory executeMsgPayload = abi.encode(
-            message
-        );
+        bytes memory executeMsgPayload = abi.encode(msg.sender.toString(), message);
         bytes memory payload = _encodePayloadToCosmWasm(executeMsgPayload);
 
         // 2. Pay for gas
@@ -101,8 +99,6 @@ contract SendReceive is AxelarExecutable {
         bytes calldata payload
     ) internal override {      
         (string memory sender, string memory message) = abi.decode(payload, (string, string));
-
-        address senderAddress = sender.toAddress();
-        storedMessage = Message(senderAddress, message);
+        storedMessage = Message(sender, message);
     }
 }

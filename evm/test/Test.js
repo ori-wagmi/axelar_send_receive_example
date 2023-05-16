@@ -1,126 +1,81 @@
-const {
-  time,
-  loadFixture,
-} = require("@nomicfoundation/hardhat-network-helpers");
-const { anyValue } = require("@nomicfoundation/hardhat-chai-matchers/withArgs");
+const { ethers } = require("hardhat");
 const { expect } = require("chai");
 
-describe("Lock", function () {
-  // We define a fixture to reuse the same setup in every test.
-  // We use loadFixture to run this setup once, snapshot that state,
-  // and reset Hardhat Network to that snapshot in every test.
-  async function deployOneYearLockFixture() {
-    const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-    const ONE_GWEI = 1_000_000_000;
+describe("SendReceive Test", function () {
+  let SendReceiveFactory, AxelarMockFactory, sendReceive, axelarMock;
+  let owner, user1;
 
-    const lockedAmount = ONE_GWEI;
-    const unlockTime = (await time.latest()) + ONE_YEAR_IN_SECS;
-
-    // Contracts are deployed using the first signer/account by default
-    const [owner, otherAccount] = await ethers.getSigners();
-
-    const Lock = await ethers.getContractFactory("Lock");
-    const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
-
-    return { lock, unlockTime, lockedAmount, owner, otherAccount };
-  }
-
-  describe("Deployment", function () {
-    it("Should set the right unlockTime", async function () {
-      const { lock, unlockTime } = await loadFixture(deployOneYearLockFixture);
-
-      expect(await lock.unlockTime()).to.equal(unlockTime);
-    });
-
-    it("Should set the right owner", async function () {
-      const { lock, owner } = await loadFixture(deployOneYearLockFixture);
-
-      expect(await lock.owner()).to.equal(owner.address);
-    });
-
-    it("Should receive and store the funds to lock", async function () {
-      const { lock, lockedAmount } = await loadFixture(
-        deployOneYearLockFixture
-      );
-
-      expect(await ethers.provider.getBalance(lock.address)).to.equal(
-        lockedAmount
-      );
-    });
-
-    it("Should fail if the unlockTime is not in the future", async function () {
-      // We don't use the fixture here because we want a different deployment
-      const latestTime = await time.latest();
-      const Lock = await ethers.getContractFactory("Lock");
-      await expect(Lock.deploy(latestTime, { value: 1 })).to.be.revertedWith(
-        "Unlock time should be in the future"
-      );
-    });
+  const chainName = "local_test";
+  
+  before(async function () {
+    [owner, user1] = await ethers.getSigners();
+    SendReceiveFactory = await ethers.getContractFactory("SendReceive");
+    AxelarMockFactory = await ethers.getContractFactory("AxelarGatewayGasServiceMock");
   });
 
-  describe("Withdrawals", function () {
-    describe("Validations", function () {
-      it("Should revert with the right error if called too soon", async function () {
-        const { lock } = await loadFixture(deployOneYearLockFixture);
+  beforeEach(async function() {
+    axelarMock = await AxelarMockFactory.deploy();
+    sendReceive = await SendReceiveFactory.deploy(axelarMock.address, axelarMock.address, chainName);
+  })
 
-        await expect(lock.withdraw()).to.be.revertedWith(
-          "You can't withdraw yet"
-        );
-      });
+  it("Send payload", async function() {
+    let fee = ethers.utils.parseEther("1");
+    let message = "Hello"; 
+    
+    // send message to gateway as user1
+    await sendReceive.connect(user1).send("destinationChain", "destinationAddress", message, { value: fee });
 
-      it("Should revert with the right error if called from another account", async function () {
-        const { lock, unlockTime, otherAccount } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    // decode payload and verify expected values
+    let payload = await axelarMock.storedPayload();
+    let version = payload.substring(0, 10);
+    expect(version).to.equal("0x00000001"); // Version 1
 
-        // We can increase the time in Hardhat Network
-        await time.increaseTo(unlockTime);
+    let gmpPayload = "0x" + payload.substring(10); // turn string to hex
 
-        // We use lock.connect() to send a transaction from another account
-        await expect(lock.connect(otherAccount).withdraw()).to.be.revertedWith(
-          "You aren't the owner"
-        );
-      });
+    // gmpPayload
+    let [contractMethod, argumentNameArray, abiTypeArray, argValues] =
+      ethers.utils.defaultAbiCoder.decode(["string", "string[]", "string[]", "bytes"], gmpPayload);
+    expect(contractMethod).to.equal("receive_message_evm");
+    expect(argumentNameArray.toString()).to.equal("source_chain,source_address,payload");
+    expect(abiTypeArray.toString()).to.equal("string,string,bytes"); 
 
-      it("Shouldn't fail if the unlockTime has arrived and the owner calls it", async function () {
-        const { lock, unlockTime } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    // argValues
+    let [chain, sourceAddress, msgPayload] =
+    ethers.utils.defaultAbiCoder.decode(["string", "string", "bytes"], argValues);
+    expect(chain).to.equal(chainName);
+    expect(ethers.utils.getAddress(sourceAddress)).to.equal(sendReceive.address);
 
-        // Transactions are sent using the first signer by default
-        await time.increaseTo(unlockTime);
+    // executeMsgPayload
+    let [sender, decoded_message] =
+      ethers.utils.defaultAbiCoder.decode(["string", "string"], msgPayload);
+    expect(ethers.utils.getAddress(sender)).to.equal(user1.address);
+    expect(decoded_message).to.equal(message);
+  })
 
-        await expect(lock.withdraw()).not.to.be.reverted;
-      });
-    });
+  it("Receive payload", async function() {
+    let payload_sender = "sender";
+    let payload_message = "hello";
 
-    describe("Events", function () {
-      it("Should emit an event on withdrawals", async function () {
-        const { lock, unlockTime, lockedAmount } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    // generate return payload
+    let returnPayload = ethers.utils.defaultAbiCoder.encode(["string", "string"], [payload_sender, payload_message]);
 
-        await time.increaseTo(unlockTime);
+    // call _execute()
+    await axelarMock.executeFromGateway(sendReceive.address, "source_chain", "source_address", returnPayload);
 
-        await expect(lock.withdraw())
-          .to.emit(lock, "Withdrawal")
-          .withArgs(lockedAmount, anyValue); // We accept any value as `when` arg
-      });
-    });
+    // verify stored message
+    let storedMessage = await sendReceive.storedMessage()
+    expect(storedMessage.sender).to.equal(payload_sender);
+    expect(storedMessage.message).to.equal(payload_message);
+  })
 
-    describe("Transfers", function () {
-      it("Should transfer the funds to the owner", async function () {
-        const { lock, unlockTime, lockedAmount, owner } = await loadFixture(
-          deployOneYearLockFixture
-        );
+  
+  it.skip("Decode Utility", async function() {
+    // Utility test to decode the payload listed by axelarScan
+    // Replace {gmpPayload} with the hex string to be decoded
+    let gmpPayload = "0x000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000002b6f736d6f317677306368786d37706d343539756875756d6d6a396e787a7235357161336d743836357135630000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007676f6f6462796500000000000000000000000000000000000000000000000000";
+    let [sender, message] = ethers.utils.defaultAbiCoder.decode(["string", "string"], gmpPayload);
 
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw()).to.changeEtherBalances(
-          [owner, lock],
-          [lockedAmount, -lockedAmount]
-        );
-      });
-    });
-  });
+    console.log(sender);
+    console.log(message);
+  })
 });

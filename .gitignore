@@ -1,8 +1,10 @@
 .editorconfig
 .notes
+.env
 
 artifacts/
 node_modules/
 cache/
 .cargo/
 target/
+flatten/

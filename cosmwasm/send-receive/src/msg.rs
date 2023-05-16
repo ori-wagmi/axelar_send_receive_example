@@ -1,4 +1,5 @@
-use cosmwasm_schema::{cw_serde, QueryResponses};
+use cosmwasm_schema::cw_serde;
+use cosmwasm_std::Binary;
 
 #[cw_serde]
 pub struct InstantiateMsg {}
@@ -9,7 +10,6 @@ pub enum ExecuteMsg {
         destination_chain: String,
         destination_address: String,
         message: String,
-        send_fee: bool,
     },
     SendMessageOsmosis {
         destination_chain: String,
@@ -21,14 +21,20 @@ pub enum ExecuteMsg {
     ReceiveMessageEvm {
         source_chain: String,
         source_address: String,
-        payload: Binary
+        payload: Binary,
     },
-
 }
 
 #[cw_serde]
-#[derive(QueryResponses)]
-pub enum QueryMsg {}
+pub enum QueryMsg {
+    GetStoredMessage {},
+}
+
+#[cw_serde]
+pub struct GetStoredMessageResp {
+    pub sender: String,
+    pub message: String,
+}
 
 #[cw_serde]
 pub struct Fee {
