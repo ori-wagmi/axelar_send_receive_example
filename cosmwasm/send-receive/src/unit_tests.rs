@@ -90,3 +90,52 @@ fn receive_evm() {
     assert_eq!(resp.sender, "sender".to_string());
     assert_eq!(resp.message, "message".to_string());
 }
+
+#[test]
+#[should_panic(expected = "Cannot execute Stargate")] // cw_multi_test does not support Stargate Messages: https://github.com/CosmWasm/cw-multi-test/issues/37
+fn send_osmosis() {
+    let (mut app, send_receive) = make_contracts();
+
+    // To be used to pay for gas
+    let funds = Coin {
+        denom: "native".to_string(),
+        amount: Uint128::new(1),
+    };
+
+    app.execute_contract(
+        Addr::unchecked("user"),
+        send_receive.clone(),
+        &ExecuteMsg::SendMessageOsmosis {
+            destination_chain: "destination_chain".to_string(),
+            destination_address: "destination_address".to_string(),
+            message: "message".to_string(),
+        },
+        &[funds],
+    )
+    .unwrap();
+}
+
+#[test]
+fn receive_osmosis() {
+    let (mut app, send_receive) = make_contracts();
+
+    // mimic GMP message
+    app.execute_contract(
+        Addr::unchecked("user"),
+        send_receive.clone(),
+        &ExecuteMsg::ReceiveMessageOsmosis {
+            sender: "sender".to_string(),
+            message: "message".to_string(),
+        },
+        &[],
+    )
+    .unwrap();
+
+    // check stored message
+    let resp: GetStoredMessageResp = app
+        .wrap()
+        .query_wasm_smart(send_receive.clone(), &QueryMsg::GetStoredMessage {})
+        .unwrap();
+    assert_eq!(resp.sender, "sender".to_string());
+    assert_eq!(resp.message, "message".to_string());
+}

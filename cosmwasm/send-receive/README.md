@@ -1,17 +1,41 @@
 # Cosmwasm SendReceive Smart Contract
 This project contains the Cosmwasm smart contract that can send and receive message payloads to/from EVM.
 
-This contract is deployed to osmosis-5 testnet: `osmo1ejnsp7uk2yrrswrxktav7gdayqc2qmtjh42xlmmzd9965f7exzpqdnm0h8`
+This contract is deployed to osmosis-5 testnet: `osmo1lywmghhyq4gqglydupfn39sh4cusechu97nq0xu0s9kn2sjy6eas65a5qz`
 
 This contract takes inspiration from: https://github.com/axelarnetwork/evm-cosmos-gmp-sample
 
-## How to use
-### Osmosisd CLI
-You can interact with the contract using osmosisd CLI: https://docs.osmosis.zone/osmosis-core/osmosisd/
-
-### Tests
+# Tests
 Unit tests can be run with `cargo test`
 
-## Osmosis -> Osmosis GMP
-This contract also contains the logic for Osmosis -> Osmosis GMP in `send_message_osmosis`. However, gas payment for this scenario is still unsolved so it currently isn't supported.
+# Build and deploy
+This process assumes you're using osmosisd CLI: https://docs.osmosis.zone/osmosis-core/osmosisd/
 
+1. Build
+```
+docker run --rm -v "$(pwd)":/code \
+  --mount type=volume,source="$(basename "$(pwd)")_cache",target=/code/target \
+  --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
+  cosmwasm/rust-optimizer:0.12.13
+  ```
+
+2. Deploy and store the <code_id>
+```
+osmosisd tx wasm store ./artifacts/send_receive.wasm --from wallet --gas-prices 0.1uosmo --gas auto --gas-adjustment 1.5 -y -b block
+```
+
+
+3. Instantiate with <code_id>, store the <contract_address>
+```
+osmosisd tx wasm instantiate <code_id> '{}' --from wallet --label "send_receive" --gas-prices 0.1uosmo --gas auto --gas-adjustment 1.3 --no-admin -y -b block
+```
+
+4. Example send message transaction from Osmosis -> Osmosis
+```
+osmosisd tx wasm execute <contract_address> '{"send_message_osmosis": {"destination_chain": "osmosis-6", "destination_address":"<destination_address>","message":"hello"}}' --amount 1uosmo --from wallet --gas-prices 0.1uosmo --gas auto --gas-adjustment 1.3 -y -b block
+```
+
+5. Example query stored message
+```
+osmosisd query wasm contract-state smart <contract_address> '{"get_stored_message":{}}'
+```

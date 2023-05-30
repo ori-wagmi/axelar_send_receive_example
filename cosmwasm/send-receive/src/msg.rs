@@ -15,9 +15,11 @@ pub enum ExecuteMsg {
         destination_chain: String,
         destination_address: String,
         message: String,
-        send_fee: bool,
     },
-    ReceiveMessageOsmosis {},
+    ReceiveMessageOsmosis {
+        sender: String,
+        message: String
+    },
     ReceiveMessageEvm {
         source_chain: String,
         source_address: String,

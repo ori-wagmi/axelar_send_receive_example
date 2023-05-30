@@ -49,7 +49,6 @@ pub fn execute(
             destination_chain,
             destination_address,
             message,
-            send_fee,
         } => exec::send_message_osmosis(
             deps,
             env,
@@ -57,14 +56,16 @@ pub fn execute(
             destination_chain,
             destination_address,
             message,
-            send_fee,
         ),
         ReceiveMessageEvm {
             source_chain,
             source_address,
             payload,
         } => exec::receive_message_evm(deps, source_chain, source_address, payload),
-        ReceiveMessageOsmosis {} => exec::receive_message_osmosis(),
+        ReceiveMessageOsmosis {
+            sender,
+            message
+        } => exec::receive_message_osmosis(deps, sender, message),
     }
 }
 
@@ -120,72 +121,40 @@ mod exec {
         info: MessageInfo,
         destination_chain: String,
         destination_address: String,
-        _message: String,
-        send_fee: bool,
+        message: String,
     ) -> Result<Response, ContractError> {
         // Message payload for Osmosis -> Osmosis GMP
-        let contract_call = serde_json_wasm::to_string(&ExecuteMsg::ReceiveMessageOsmosis {})
+        let contract_call = serde_json_wasm::to_string(&ExecuteMsg::ReceiveMessageOsmosis { sender: info.sender.to_string(), message })
             .expect("Failed to serialize struct to JSON");
         let utf8_bytes = contract_call.as_bytes();
         let utf8_vec = utf8_bytes.to_owned();
         let mut message_payload: Vec<u8> = vec![0, 0, 0, 2];
         message_payload.extend(utf8_vec);
 
+        let gmp_message: GmpMessage = GmpMessage {
+            destination_chain,
+            destination_address,
+            payload: message_payload.to_vec(),
+            type_: 1,
+            fee: None,
+        };
+
         // info.funds used to pay gas. Must only contain 1 token type.
         let coin: cosmwasm_std::Coin = cw_utils::one_coin(&info).unwrap();
 
-        // if send_fee -> include GmpMessage.fee field, otherwise None
-        if send_fee {
-            // Generate gmp message to be included in the IBC memo
+        let ibc_message = crate::ibc::MsgTransfer {
+            source_port: "transfer".to_string(),
+            source_channel: "channel-3".to_string(), // Testnet Osmosis to axelarnet: https://docs.axelar.dev/resources/testnet#ibc-channels
+            token: Some(coin.into()),
+            sender: env.contract.address.to_string(),
+            receiver: "axelar1dv4u5k73pzqrxlzujxg3qp8kvc3pje7jtdvu72npnt5zhq05ejcsn5qme5"
+                .to_string(),
+            timeout_height: None,
+            timeout_timestamp: Some(env.block.time.plus_seconds(604_800u64).nanos()),
+            memo: to_string(&gmp_message).unwrap(),
+        };
 
-            let gmp_message: GmpMessage = GmpMessage {
-                destination_chain,
-                destination_address,
-                payload: message_payload.to_vec(),
-                type_: 1,
-                fee: Some(Fee {
-                    amount: coin.amount.to_string(),
-                    recipient: "axelar1uu8enfg5tq7ycnwyk7zcd72aq7fk0fcx4p2sdm".to_string(), // Axelar gas receiver
-                }),
-            };
-
-            // Generate IBC message to be sent to the Axelar Gateway
-            let ibc_message = crate::ibc::MsgTransfer {
-                source_port: "transfer".to_string(),
-                source_channel: "channel-3".to_string(), // Testnet Osmosis to axelarnet: https://docs.axelar.dev/resources/testnet#ibc-channels
-                token: Some(coin.into()),
-                sender: env.contract.address.to_string(),
-                receiver: "axelar1dv4u5k73pzqrxlzujxg3qp8kvc3pje7jtdvu72npnt5zhq05ejcsn5qme5"
-                    .to_string(), // Axelar Gateway
-                timeout_height: None,
-                timeout_timestamp: Some(env.block.time.plus_seconds(604_800u64).nanos()),
-                memo: to_string(&gmp_message).unwrap(),
-            };
-
-            Ok(Response::new().add_message(ibc_message))
-        } else {
-            let gmp_message: GmpMessage = GmpMessage {
-                destination_chain,
-                destination_address,
-                payload: message_payload.to_vec(),
-                type_: 1,
-                fee: None,
-            };
-
-            let ibc_message = crate::ibc::MsgTransfer {
-                source_port: "transfer".to_string(),
-                source_channel: "channel-3".to_string(), // Testnet Osmosis to axelarnet: https://docs.axelar.dev/resources/testnet#ibc-channels
-                token: Some(coin.into()),
-                sender: env.contract.address.to_string(),
-                receiver: "axelar1dv4u5k73pzqrxlzujxg3qp8kvc3pje7jtdvu72npnt5zhq05ejcsn5qme5"
-                    .to_string(),
-                timeout_height: None,
-                timeout_timestamp: Some(env.block.time.plus_seconds(604_800u64).nanos()),
-                memo: to_string(&gmp_message).unwrap(),
-            };
-
-            Ok(Response::new().add_message(ibc_message))
-        }
+        Ok(Response::new().add_message(ibc_message))
     }
 
     pub fn receive_message_evm(
@@ -214,7 +183,16 @@ mod exec {
         Ok(Response::new())
     }
 
-    pub fn receive_message_osmosis() -> Result<Response, ContractError> {
+    pub fn receive_message_osmosis(deps: DepsMut, sender: String, message: String) -> Result<Response, ContractError> {
+        // store message
+        STORED_MESSAGE.save(
+            deps.storage,
+            &Message {
+                sender,
+                message
+            },
+        )?;
+
         Ok(Response::new())
     }
 }
